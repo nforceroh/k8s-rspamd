@@ -1,0 +1,17 @@
+addic7ed.com
+amazon.com
+amazonses.com
+anthem.com
+gmail.com
+google.com
+hittheriver.com
+intuit.com
+luxgroup.net
+microsoft.com
+nf.lab
+nforcer.com
+outlook.com
+pphosted.com
+rr.com
+st.com
+ti.com

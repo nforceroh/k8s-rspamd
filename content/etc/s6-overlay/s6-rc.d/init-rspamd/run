@@ -1,0 +1,102 @@
+#!/command/with-contenv bash
+
+### Set Defaults
+ADMIN_PASS=${ADMIN_PASS:-"admin"}
+PLUGIN_ASN=${PLUGIN_ASN:-"TRUE"}
+PLUGIN_CLAMAV=${PLUGIN_CLAMAV:-"TRUE"}
+PLUGIN_EMAILS=${PLUGIN_EMAILS:-"TRUE"}
+PLUGIN_GREYLISTING=${PLUGIN_GREYLISTING:-"TRUE"}
+PLUGIN_MILTER=${PLUGIN_MILTER:-"FALSE"}
+CLAMAV_HOST=${CLAMAV_HOST:-"clamav"}
+CLAMAV_PORT=${CLAMAV_PORT:-"3310"}
+DCC_HOST=${DCC_HOST:-"dcc-svc"}
+DCC_PORT=${DCC_PORT:-"10045"}
+REDIS_HOST=${REDIS_HOST:-"redis"}
+REDIS_PORT=${REDIS_PORT:-"6379"}
+REDIS_TIMEOUT=${REDIS_TIMEOUT:-"15s"}
+REDIS_DB=${REDIS_DB:-"7"}
+LOG_LEVEL=${LOG_LEVEL:-"info"} # error,warning,info,debug
+
+mkdir -p /etc/rspamd/local.d/maps.d
+for f in `find /assets/rspamd/local.d -maxdepth 1 -type f`; do
+	echo "Checking file ${f}"
+	fn=$(basename ${f})
+	nfp="/etc/rspamd/local.d/${fn}"
+	echo "Creating ${nfp}"
+	cat ${f} > ${nfp}
+done
+
+for f in `find /assets/rspamd/maps.d -maxdepth 1 -type f`; do
+	echo "Checking file ${f}"
+	fn=$(basename ${f})
+	nfp="/etc/rspamd/local.d/maps.d/${fn}"
+	echo "Creating ${nfp}"
+	cat ${f} > ${nfp}
+done
+
+for f in `find /assets/rspamd/override.d -maxdepth 1 -type f`; do
+	echo "Checking file ${f}"
+	fn=$(basename ${f})
+	nfp="/etc/rspamd/override.d/${fn}"
+	echo "Creating ${nfp}"
+	cat ${f} > ${nfp}
+done
+
+
+### Set Password
+sed -i -e '/password = /c\password  = "'${ADMIN_PASS}'";' /etc/rspamd/local.d/worker-controller.inc
+
+### Set Log Level
+sed -i -e '/level = /c\level = "'${LOG_LEVEL}'";' /etc/rspamd/local.d/logging.inc
+
+
+### Setup Redis
+cat <<EOF > /etc/rspamd/local.d/redis.conf
+servers = "$REDIS_HOST:$REDIS_PORT";
+db = "$REDIS_DB";
+EOF
+
+#sed -i -e '/servers = /c\servers = "'${REDIS_HOST}':'${REDIS_PORT}'";' /etc/rspamd/local.d/classifier-bayes.conf
+sed -i -e '/servers = /c\servers = "'${REDIS_HOST}':'${REDIS_PORT}'";' /etc/rspamd/local.d/greylist.conf
+sed -i -e '/servers = /c\servers = "'${REDIS_HOST}':'${REDIS_PORT}'";' /etc/rspamd/local.d/statistic.conf
+sed -i -e '/servers = /c\servers = "'${REDIS_HOST}':'${REDIS_PORT}'";' /etc/rspamd/local.d/ip_score.conf
+sed -i -e '/servers = /c\servers = "'${REDIS_HOST}':'${REDIS_PORT}'";' /etc/rspamd/local.d/reputation.conf
+sed -i -e '/servers = /c\servers = "'${REDIS_HOST}':'${REDIS_PORT}'";' /etc/rspamd/local.d/history_redis.conf
+sed -i -e '/servers = /c\servers = "'${REDIS_HOST}':'${REDIS_PORT}'";' /etc/rspamd/local.d/mx_check.conf
+
+# Clamav
+sed -i -e '/servers = /c\servers = "'${CLAMAV_HOST}':'${CLAMAV_PORT}'";' /etc/rspamd/local.d/antivirus.conf
+
+# DCC
+sed -i -e '/servers = /c\servers = "'${DCC_HOST}':'${DCC_PORT}'";' /etc/rspamd/local.d/dcc.conf
+
+if [ "$PLUGIN_DKIM" = "TRUE" ] || [ "$PLUGIN_DKIM" = "true" ];  then
+	if [ ! -d /var/lib/rspamd/dkim ]; then
+		mkdir -p /var/lib/rspamd/dkim
+	fi
+	if [ ! -e /var/lib/rspamd/dkim/dkim.key ]; then
+		rspamadm dkim_keygen -b 2048 -s dkim -k /var/lib/rspamd/dkim/dkim.key > /var/lib/rspamd/dkim/dkim.txt
+	fi
+	chmod 440 /var/lib/rspamd/dkim/*
+cat <<EOF> /etc/rspamd/local.d/dkim_signing.conf
+selector = "mail";
+path = "/var/lib/rspamd/dkim/\$selector.key";
+allow_username_mismatch = true;
+EOF
+	cp -R /etc/rspamd/local.d/dkim_signing.conf /etc/rspamd/local.d/arc.conf
+fi 
+
+#FEATURES_ENABLED=`set -o posix; set | sort | grep PLUGIN | grep TRUE |sed -e 's/PLUGIN_//g' | sed -e 's/=TRUE//g' | awk -vRS="" -vOFS=', ' '$1=$1' | tr A-Z a-z`
+#echo '** [rspamd] Enabling the following features: '$FEATURES_ENABLED
+
+### Setup Persistent Storage
+if [ ! -d /run/rspamd ]; then
+	mkdir -p /run/rspamd
+fi
+
+chown -R rspamd:rspamd /var/lib/rspamd /etc/rspamd /run/rspamd
+
+mkdir -p /tmp/state
+touch /tmp/state/rspamd-init
+
+echo "rspamd modfications completed"
