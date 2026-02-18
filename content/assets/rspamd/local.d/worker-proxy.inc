@@ -1,4 +1,4 @@
-bind_socket = "*:11332";
+bind_socket = "0.0.0.0:11332";
 milter = yes; # Enable milter mode
 timeout = 120s; # Needed for Milter usually
 upstream "local" {
