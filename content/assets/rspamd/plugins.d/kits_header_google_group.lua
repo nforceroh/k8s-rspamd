@@ -1,6 +1,6 @@
 rspamd_config:register_symbol{
     name = "KITS_HEADER_GOOGLE_GROUP",
-    score = 0.1,
+    score = 5.0,
     group = "headers",
     description = "Message contains X-Google-Group-Id header or List-Unsubscribe header with googlegroups",
     callback = function(task)

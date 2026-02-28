@@ -63,6 +63,7 @@ sed -i -e '/servers = /c\servers = "'${REDIS_HOST}':'${REDIS_PORT}'";' /etc/rspa
 sed -i -e '/servers = /c\servers = "'${REDIS_HOST}':'${REDIS_PORT}'";' /etc/rspamd/local.d/reputation.conf
 sed -i -e '/servers = /c\servers = "'${REDIS_HOST}':'${REDIS_PORT}'";' /etc/rspamd/local.d/history_redis.conf
 sed -i -e '/servers = /c\servers = "'${REDIS_HOST}':'${REDIS_PORT}'";' /etc/rspamd/local.d/mx_check.conf
+sed -i -e '/servers = /c\servers = "'${REDIS_HOST}':'${REDIS_PORT}'";' /etc/rspamd/local.d/known_senders.conf
 
 # Clamav
 sed -i -e '/servers = /c\servers = "'${CLAMAV_HOST}':'${CLAMAV_PORT}'";' /etc/rspamd/local.d/antivirus.conf
