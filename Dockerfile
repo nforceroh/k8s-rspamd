@@ -1,4 +1,4 @@
-FROM ghcr.io/nforceroh/k8s-alpine-baseimage:latest
+FROM ghcr.io/nforceroh/k8s-alpine-baseimage:3.23
 
 ARG \
   BUILD_DATE=now \

@@ -2,3 +2,22 @@
 worker "log_helper" {
   count = 1;
 }
+
+fuzzy_check {
+	rule "fuzzy_local" {
+		# BUG: cannot use unixsocket
+		# servers = "$RUNDIR/fuzzy.sock";
+		servers = "127.0.0.1";
+		mime_types [ "*" ]
+	}
+}
+
+classifier {
+	bayes {
+		backend = "redis";
+	}
+}
+
+arc {
+	use_redis = true;
+}
