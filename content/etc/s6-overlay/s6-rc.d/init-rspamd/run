@@ -11,33 +11,103 @@ REDIS_PORT=${REDIS_PORT:-"6379"}
 REDIS_DB=${REDIS_DB:-"7"}
 REDIS_TIMEOUT=${REDIS_TIMEOUT:-"1.0"}
 LOG_LEVEL=${LOG_LEVEL:-"info"} # error,warning,info,debug
+DEBUG_MODULES=${DEBUG_MODULES:-"gpt"}
 
-### Copy rspamd configuration files
-echo "Copying rspamd configuration files..."
-cd /assets/rspamd
-tar cvf - . | tar xvf - -C /etc/rspamd/
-echo "Configuration files copied."
+log() {
+  echo "[init-rspamd] $*"
+}
 
-### Set Password
-sed -i "s/password = .*/password = \"${ADMIN_PASS}\";/" /etc/rspamd/local.d/worker-controller.inc
+format_debug_modules() {
+	local raw="$1"
+	local formatted=""
+	local item=""
 
-### Set Log Level
-sed -i "s/level = .*/level = \"${LOG_LEVEL}\";/" /etc/rspamd/local.d/logging.inc
+	# Allow passing an already formatted list: ["module1", "module2"]
+	if [[ "$raw" =~ ^\[.*\]$ ]]; then
+		echo "$raw"
+		return 0
+	fi
 
-### Setup Redis
-cat <<EOF > /etc/rspamd/local.d/redis.conf
+	# Convert comma-separated values into rspamd list syntax.
+	IFS=',' read -ra items <<< "$raw"
+	for item in "${items[@]}"; do
+		item="${item#${item%%[![:space:]]*}}"
+		item="${item%${item##*[![:space:]]}}"
+		if [[ -n "$item" ]]; then
+			if [[ -n "$formatted" ]]; then
+				formatted+=", "
+			fi
+			formatted+="\"$item\""
+		fi
+	done
+
+	if [[ -z "$formatted" ]]; then
+		echo "[]"
+		return 0
+	fi
+
+	echo "[$formatted]"
+}
+
+copy_rspamd_configs() {
+  log "Copying rspamd configuration files"
+  cd /assets/rspamd || exit 1
+  tar cvf - . | tar xvf - -C /etc/rspamd/
+  log "Configuration files copied"
+}
+
+configure_worker_controller() {
+  sed -i "s/password = .*/password = \"${ADMIN_PASS}\";/" /etc/rspamd/local.d/worker-controller.inc
+}
+
+configure_logging() {
+  local formatted_debug_modules
+  sed -i "s/level = .*/level = \"${LOG_LEVEL}\";/" /etc/rspamd/local.d/logging.inc
+
+  formatted_debug_modules=$(format_debug_modules "$DEBUG_MODULES")
+  sed -i "s|debug_modules = .*|debug_modules = ${formatted_debug_modules};|" /etc/rspamd/local.d/logging.inc
+}
+
+configure_redis() {
+  cat <<EOF > /etc/rspamd/local.d/redis.conf
 servers = "$REDIS_HOST:$REDIS_PORT";
 db = "$REDIS_DB";
 write_servers = "$REDIS_HOST:$REDIS_PORT";
 read_servers = "$REDIS_HOST:$REDIS_PORT";
 timeout = $REDIS_TIMEOUT;
 EOF
+}
 
-# Clamav
-sed -i "s/servers = .*/servers = \"${CLAMAV_HOST}:${CLAMAV_PORT}\";/" /etc/rspamd/local.d/antivirus.conf
+configure_antivirus() {
+  sed -i "s/servers = .*/servers = \"${CLAMAV_HOST}:${CLAMAV_PORT}\";/" /etc/rspamd/local.d/antivirus.conf
+}
 
-# DCC
-sed -i "s/servers = .*/servers = \"${DCC_HOST}:${DCC_PORT}\";/" /etc/rspamd/local.d/dcc.conf
+configure_dcc() {
+  sed -i "s/servers = .*/servers = \"${DCC_HOST}:${DCC_PORT}\";/" /etc/rspamd/local.d/dcc.conf
+}
+
+setup_persistent_storage() {
+  if [ ! -d /run/rspamd ]; then
+    mkdir -p /run/rspamd
+  fi
+
+  chown -R rspamd:rspamd /var/lib/rspamd /etc/rspamd /run/rspamd
+
+  mkdir -p /tmp/state
+  touch /tmp/state/rspamd-init
+}
+
+main() {
+  copy_rspamd_configs
+  configure_worker_controller
+  configure_logging
+  configure_redis
+  configure_antivirus
+  configure_dcc
+  setup_persistent_storage
+
+  log "rspamd modifications completed"
+}
 
 # if [ "$PLUGIN_DKIM" = "TRUE" ] || [ "$PLUGIN_DKIM" = "true" ];  then
 # 	if [ ! -d /var/lib/rspamd/dkim ]; then
@@ -58,14 +128,4 @@ sed -i "s/servers = .*/servers = \"${DCC_HOST}:${DCC_PORT}\";/" /etc/rspamd/loca
 #FEATURES_ENABLED=`set -o posix; set | sort | grep PLUGIN | grep TRUE |sed -e 's/PLUGIN_//g' | sed -e 's/=TRUE//g' | awk -vRS="" -vOFS=', ' '$1=$1' | tr A-Z a-z`
 #echo '** [rspamd] Enabling the following features: '$FEATURES_ENABLED
 
-### Setup Persistent Storage
-if [ ! -d /run/rspamd ]; then
-	mkdir -p /run/rspamd
-fi
-
-chown -R rspamd:rspamd /var/lib/rspamd /etc/rspamd /run/rspamd
-
-mkdir -p /tmp/state
-touch /tmp/state/rspamd-init
-
-echo "rspamd modifications completed"
+main "$@"
