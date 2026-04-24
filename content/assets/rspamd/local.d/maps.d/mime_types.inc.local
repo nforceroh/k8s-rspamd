@@ -1,0 +1,3 @@
+# Local mime type score overrides
+# Format: mime/type <score>
+# Example: application/x-executable 5.0
