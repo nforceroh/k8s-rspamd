@@ -12,6 +12,8 @@ REDIS_DB=${REDIS_DB:-"7"}
 REDIS_TIMEOUT=${REDIS_TIMEOUT:-"1.0"}
 LOG_LEVEL=${LOG_LEVEL:-"info"} # error,warning,info,debug
 DEBUG_MODULES=${DEBUG_MODULES:-"gpt"}
+# NEW DEFAULT: Fallback to system default if no specific server is defined
+RSPAMD_DNS_SERVERS=${RSPAMD_DNS_SERVERS:-""} 
 
 log() {
   echo "[init-rspamd] $*"
@@ -22,13 +24,11 @@ format_debug_modules() {
 	local formatted=""
 	local item=""
 
-	# Allow passing an already formatted list: ["module1", "module2"]
 	if [[ "$raw" =~ ^\[.*\]$ ]]; then
 		echo "$raw"
 		return 0
 	fi
 
-	# Convert comma-separated values into rspamd list syntax.
 	IFS=',' read -ra items <<< "$raw"
 	for item in "${items[@]}"; do
 		item="${item#${item%%[![:space:]]*}}"
@@ -66,6 +66,25 @@ configure_logging() {
 
   formatted_debug_modules=$(format_debug_modules "$DEBUG_MODULES")
   sed -i "s|debug_modules = .*|debug_modules = ${formatted_debug_modules};|" /etc/rspamd/local.d/logging.inc
+}
+
+# NEW FUNCTION: Dynamically injection configuration block for DNS Lookups
+configure_dns() {
+  if [[ -n "$RSPAMD_DNS_SERVERS" ]]; then
+    log "Configuring custom runtime DNS nameservers: $RSPAMD_DNS_SERVERS"
+    
+    # Ensure local.d directory layer paths exist securely
+    mkdir -p /etc/rspamd/local.d
+    
+    # Inject nameserver arrays into options.inc using a clean schema block
+    cat <<EOF > /etc/rspamd/local.d/options.inc
+dns {
+    nameserver = ["${RSPAMD_DNS_SERVERS}"];
+}
+EOF
+  else
+    log "No custom DNS servers defined, defaulting to system resolv.conf settings"
+  fi
 }
 
 configure_redis() {
@@ -109,6 +128,7 @@ main() {
   copy_rspamd_configs
   configure_worker_controller
   configure_logging
+  configure_dns          # ACTIVATED: Run DNS generation after file copy step executions
   configure_redis
   configure_antivirus
   configure_dcc
@@ -117,24 +137,5 @@ main() {
 
   log "rspamd modifications completed"
 }
-
-# if [ "$PLUGIN_DKIM" = "TRUE" ] || [ "$PLUGIN_DKIM" = "true" ];  then
-# 	if [ ! -d /var/lib/rspamd/dkim ]; then
-# 		mkdir -p /var/lib/rspamd/dkim
-# 	fi
-# 	if [ ! -e /var/lib/rspamd/dkim/dkim.key ]; then
-# 		rspamadm dkim_keygen -b 2048 -s dkim -k /var/lib/rspamd/dkim/dkim.key > /var/lib/rspamd/dkim/dkim.txt
-# 	fi
-# 	chmod 440 /var/lib/rspamd/dkim/*
-# cat <<EOF> /etc/rspamd/local.d/dkim_signing.conf
-# selector = "mail";
-# path = "/var/lib/rspamd/dkim/\${selector}.key";
-# allow_username_mismatch = true;
-# EOF
-# 	cp -R /etc/rspamd/local.d/dkim_signing.conf /etc/rspamd/local.d/arc.conf
-# fi 
-
-#FEATURES_ENABLED=`set -o posix; set | sort | grep PLUGIN | grep TRUE |sed -e 's/PLUGIN_//g' | sed -e 's/=TRUE//g' | awk -vRS="" -vOFS=', ' '$1=$1' | tr A-Z a-z`
-#echo '** [rspamd] Enabling the following features: '$FEATURES_ENABLED
 
 main "$@"
