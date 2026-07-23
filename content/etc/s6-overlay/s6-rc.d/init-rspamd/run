@@ -14,6 +14,9 @@ REDIS_DB=${REDIS_DB:-"7"}
 REDIS_TIMEOUT=${REDIS_TIMEOUT:-"1.0"}
 LOG_LEVEL=${LOG_LEVEL:-"info"} # error,warning,info,debug
 DEBUG_MODULES=${DEBUG_MODULES:-"gpt,,metadata_exporter"} # Comma-separated list of modules to debug
+GPT_ENABLED=${GPT_ENABLED:-"false"}
+GPT_URL=${GPT_URL:-"http://ollama:11434/v1/chat/completions"}
+GPT_MODELS=${GPT_MODELS:-"qwen2.5:7b,gemma3:4b"}
 # NEW DEFAULT: Fallback to system default if no specific server is defined
 RSPAMD_DNS_SERVERS=${RSPAMD_DNS_SERVERS:-""} 
 
@@ -49,6 +52,36 @@ format_debug_modules() {
 	fi
 
 	echo "[$formatted]"
+}
+
+format_gpt_models() {
+  local raw="$1"
+  local formatted=""
+  local item=""
+
+  if [[ "$raw" =~ ^\[.*\]$ ]]; then
+    echo "$raw"
+    return 0
+  fi
+
+  IFS=',' read -ra items <<< "$raw"
+  for item in "${items[@]}"; do
+    item="${item#${item%%[![:space:]]*}}"
+    item="${item%${item##*[![:space:]]}}"
+    if [[ -n "$item" ]]; then
+      if [[ -n "$formatted" ]]; then
+        formatted+=", "
+      fi
+      formatted+="\"$item\""
+    fi
+  done
+
+  if [[ -z "$formatted" ]]; then
+    echo "[]"
+    return 0
+  fi
+
+  echo "[$formatted]"
 }
 
 copy_rspamd_configs() {
@@ -107,6 +140,41 @@ configure_dcc() {
   sed -i "s/servers = .*/servers = \"${DCC_HOST}:${DCC_PORT}\";/" /etc/rspamd/local.d/dcc.conf
 }
 
+configure_gpt() {
+  local gpt_state="false"
+  local formatted_gpt_models=""
+  local escaped_gpt_url=""
+
+  case "${GPT_ENABLED,,}" in
+    1|true|yes|on)
+      gpt_state="true"
+      ;;
+  esac
+
+  if [ -f /etc/rspamd/local.d/gpt.conf ]; then
+    sed -i "s/^enabled = .*/enabled = ${gpt_state};/" /etc/rspamd/local.d/gpt.conf
+
+    if [[ -n "$GPT_URL" ]]; then
+      escaped_gpt_url=${GPT_URL//\\/\\\\}
+      escaped_gpt_url=${escaped_gpt_url//&/\\&}
+      escaped_gpt_url=${escaped_gpt_url//|/\\|}
+      escaped_gpt_url=${escaped_gpt_url//\"/\\\"}
+      sed -i "s|^url = .*|url = \"${escaped_gpt_url}\";|" /etc/rspamd/local.d/gpt.conf
+      log "GPT URL override applied"
+    fi
+
+    if [[ -n "$GPT_MODELS" ]]; then
+      formatted_gpt_models=$(format_gpt_models "$GPT_MODELS")
+      sed -i "s|^model = .*|model = ${formatted_gpt_models};|" /etc/rspamd/local.d/gpt.conf
+      log "GPT model override applied: ${formatted_gpt_models}"
+    fi
+
+    log "GPT module enabled state set to: ${gpt_state}"
+  else
+    log "Skipping GPT module configuration: /etc/rspamd/local.d/gpt.conf not found"
+  fi
+}
+
 cleanup_old_cache() {
   log "Cleaning up cache files older than 7 days"
   if [ -d /var/lib/rspamd ]; then
@@ -116,8 +184,38 @@ cleanup_old_cache() {
 }
 
 configure_metadata_exporter() {
-  if [ -f /etc/rspamd/local.d/metadata_exporter.conf ]; then
-    sed -i "s|url = .*|url = \"http://${MAILGALLOWS_HOST}:${MAILGALLOWS_PORT}/quarantine\";|" /etc/rspamd/local.d/metadata_exporter.conf
+  local metadata_exporter_conf="/etc/rspamd/local.d/metadata_exporter.conf"
+
+  if [[ -n "$MAILGALLOWS_HOST" && -n "$MAILGALLOWS_PORT" ]]; then
+    cat <<EOF > "$metadata_exporter_conf"
+# /etc/rspamd/local.d/metadata_exporter.conf
+
+#allow_proxy_worker = true;
+
+rules {
+  MAILGALLOWS_INGEST {
+    backend = "http";
+    url = "http://${MAILGALLOWS_HOST}:${MAILGALLOWS_PORT}/quarantine";
+    selector = "gallows_bypass";
+    formatter = "multipart";
+    timeout = 5;
+    defer = false;
+  }
+}
+
+custom_select {
+  gallows_bypass = <<EOD
+return function(task)
+     local rspamd_logger = require "rspamd_logger"
+     rspamd_logger.infox(task, "MAILGALLOWS RUNTIME FORCE TRACE: Triggering ingest block manually")
+     return true
+end
+EOD;
+}
+EOF
+    log "metadata_exporter.conf generated from MAILGALLOWS_HOST/MAILGALLOWS_PORT"
+  else
+    log "Skipping metadata exporter generation: MAILGALLOWS_HOST/MAILGALLOWS_PORT not set"
   fi
 }
 
@@ -140,6 +238,7 @@ main() {
   configure_redis
   configure_antivirus
   configure_dcc
+  configure_gpt
   configure_metadata_exporter
   cleanup_old_cache
   setup_persistent_storage
