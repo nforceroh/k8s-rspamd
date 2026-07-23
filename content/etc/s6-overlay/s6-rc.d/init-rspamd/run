@@ -13,7 +13,7 @@ REDIS_PORT=${REDIS_PORT:-"6379"}
 REDIS_DB=${REDIS_DB:-"7"}
 REDIS_TIMEOUT=${REDIS_TIMEOUT:-"1.0"}
 LOG_LEVEL=${LOG_LEVEL:-"info"} # error,warning,info,debug
-DEBUG_MODULES=${DEBUG_MODULES:-"gpt"}
+DEBUG_MODULES=${DEBUG_MODULES:-"gpt,,metadata_exporter"} # Comma-separated list of modules to debug
 # NEW DEFAULT: Fallback to system default if no specific server is defined
 RSPAMD_DNS_SERVERS=${RSPAMD_DNS_SERVERS:-""} 
 
