@@ -17,6 +17,7 @@ DEBUG_MODULES=${DEBUG_MODULES:-"gpt,,metadata_exporter"} # Comma-separated list 
 GPT_ENABLED=${GPT_ENABLED:-"false"}
 GPT_URL=${GPT_URL:-"http://ollama:11434/v1/chat/completions"}
 GPT_MODELS=${GPT_MODELS:-"qwen2.5:7b,gemma3:4b"}
+NFORCER_MULTIMAP_URL=${NFORCER_MULTIMAP_URL:-"https://raw.githubusercontent.com/nforceroh/rspamd_config/refs/heads/main/local.d/_multimap_nforcer.conf"}
 # NEW DEFAULT: Fallback to system default if no specific server is defined
 RSPAMD_DNS_SERVERS=${RSPAMD_DNS_SERVERS:-""} 
 
@@ -89,6 +90,24 @@ copy_rspamd_configs() {
   cd /assets/rspamd || exit 1
   tar cvf - . | tar xvf - -C /etc/rspamd/
   log "Configuration files copied"
+}
+
+update_nforcer_multimap_config() {
+  local target_file="/etc/rspamd/local.d/_multimap_nforcer.conf"
+
+  if [[ -z "$NFORCER_MULTIMAP_URL" ]]; then
+    log "Skipping nforcer multimap update: NFORCER_MULTIMAP_URL is empty"
+    return 0
+  fi
+
+  log "Updating nforcer multimap config from $NFORCER_MULTIMAP_URL"
+  mkdir -p /etc/rspamd/local.d
+
+  if wget -qO "$target_file" "$NFORCER_MULTIMAP_URL"; then
+    log "Updated $target_file"
+  else
+    log "Failed to download nforcer multimap config; keeping bundled local file"
+  fi
 }
 
 configure_worker_controller() {
@@ -232,6 +251,7 @@ setup_persistent_storage() {
 
 main() {
   copy_rspamd_configs
+  update_nforcer_multimap_config
   configure_worker_controller
   configure_logging
   configure_dns          # ACTIVATED: Run DNS generation after file copy step executions
